@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cashir</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --fg:#e6e8ee; --mute:#8b93a7; --ok:#3ddc97; --warn:#ffb347; --bad:#ff5c5c; --acc:#7aa2ff; }
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0; letter-spacing:.3px } .pill { padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600 }
+  .live { background:#173a2c; color:var(--ok) } .dry { background:#3a2f17; color:var(--warn) } .paused { background:#3a1717; color:var(--bad) }
+  select { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 8px; margin-left:auto }
+  main { padding:18px 20px; display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card h2 { margin:0 0 8px; font-size:12px; text-transform:uppercase; color:var(--mute); letter-spacing:.6px }
+  .big { font-size:28px; font-weight:650; } .sub { color:var(--mute); font-size:12px }
+  .wide { grid-column:1/-1 } table { width:100%; border-collapse:collapse; font-size:12.5px } th,td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { color:var(--mute); font-weight:500 } .v-HOLD,.v-POSTED,.v-WOULD_POST,.v-REPRICE,.v-REPOST { color:var(--acc) } .v-HANDOFF,.v-SETTLED,.v-SETTLING { color:var(--ok); font-weight:700 }
+  .v-WITHDRAW,.v-PAUSED { color:var(--warn) } .v-ERROR,.v-BREAKER,.v-TIMEOUT { color:var(--bad) }
+  .alert { grid-column:1/-1; background:#173a2c; border:1px solid var(--ok); border-radius:10px; padding:14px 16px; white-space:pre-wrap; font-family:ui-monospace,Menlo,monospace }
+  .kv div { display:flex; justify-content:space-between; gap:12px; padding:3px 0; border-bottom:1px dashed var(--line) } .kv span:last-child { font-variant-numeric:tabular-nums }
+  footer { color:var(--mute); font-size:12px; padding:0 20px 20px }
+</style>
+</head>
+<body>
+<header><h1>Cashir</h1><span id="mode" class="pill dry">…</span><span id="side" class="sub"></span>
+  <select id="period"><option value="1h">last hour</option><option value="6h">6 h</option><option value="24h" selected>24 h</option><option value="7d">7 d</option><option value="30d">30 d</option></select></header>
+<main id="main"></main>
+<footer>Read-only. Every number comes from <code>state/journal.jsonl</code> — what the cashier actually did. Refreshes every 30 s. A HANDOFF is a certified win waiting for a human to settle on nearinstant.xyz.</footer>
+<script>
+const $ = (s) => document.querySelector(s);
+const n = (x, d=2) => x == null ? "–" : Number(x).toFixed(d);
+async function load() {
+  const p = $("#period").value;
+  const dashEsc = (t) => String(t == null ? "" : t).replace(/[&<>"\x27]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\x22": "&quot;", "\x27": "&#39;" }[c]));
+  const [r, led] = await Promise.all([fetch("/api/report?period="+p).then(x=>x.json()), fetch("/api/ledger?period="+p).then(x=>x.json())]);
+  const mode = $("#mode"); mode.textContent = r.paused ? "PAUSED" : (r.live ? "LIVE" : "DRY RUN"); mode.className = "pill " + (r.paused ? "paused" : r.live ? "live" : "dry");
+  $("#side").textContent = "side " + r.side + (r.side === 1 ? " · selling XMR for XNO (role B)" : " · selling XNO for XMR (role A)") + " · v" + r.version;
+  const o = r.resting_offer, a = r.activity, c = r.cycles;
+  let h = "";
+  if (r.handoffs_pending_human.length) h += `<div class="alert">⚑ ${r.handoffs_pending_human.length} certified take(s) waiting for a human to settle\n` +
+    r.handoffs_pending_human.map(x => dashEsc(`${x.key}  at ${x.at}  ${JSON.stringify(x.deal)}`)).join("\n") + `</div>`;
+  h += card("Realized", `<div class="big">${n(r.realized.net_xmr, 8)} XMR</div><div class="sub">${r.realized.settled_swaps} settled swap(s)${r.realized.note ? " · " + r.realized.note : ""}</div>`);
+  h += card("Handoffs", `<div class="big">${a.handoffs}</div><div class="sub">certified takes handed to a human · ${r.handoffs_pending_human.length} pending</div>`);
+  h += card("Cycles", `<div class="big">${c.total}</div><div class="sub">${c.uptime_pct == null ? "–" : c.uptime_pct + "%"} ok · ${c.errors} errors · avg ${n(c.avg_seconds,1)} s</div>`);
+  h += card("Resting offer", o ? `<div class="big">${o.sizeXno} XNO</div><div class="sub">ask ${Number(o.ask).toFixed(9)} XMR/XNO · ${o.spread_bps} bps spread · net ${o.certified_net_bps} bps · age ${o.ageSeconds}/${o.ttlSeconds} s</div>` : `<div class="big">none</div><div class="sub">nothing on the book</div>`);
+  h += card("Activity", `<div class="kv">${["posted","repriced","withdrew","declined","held","dry_would_post","paused"].map(k=>`<div><span>${k.replace("_"," ")}</span><span>${a[k]}</span></div>`).join("")}</div>`);
+  h += card("Verdicts", `<div class="kv">${Object.entries(c.verdicts).sort((x,y)=>y[1]-x[1]).map(([k,v])=>`<div><span class="v-${k}">${k}</span><span>${v}</span></div>`).join("") || "<div class=sub>none yet</div>"}</div>`);
+  h += card("Pricing", `<div class="kv"><div><span>avg certified net at post</span><span>${r.pricing.avg_certified_net_bps_at_post == null ? "–" : r.pricing.avg_certified_net_bps_at_post + " bps"}</span></div><div><span>offer size</span><span>${r.pricing.offer_size_xno} XNO</span></div><div><span>accept floor</span><span>30 bps</span></div><div><span>fee assumed</span><span>0.0002 XMR</span></div></div>`);
+  const rows = led.filter(e => e.cmd === "cycle" || e.cmd === "handoff" || e.cmd === "settled" || e.cmd === "pause" || e.cmd === "resume").slice(-60).reverse();
+  h += `<div class="card wide"><h2>Ledger (newest first)</h2><table><tr><th>time</th><th>cmd</th><th>verdict</th><th>actions / detail</th></tr>` +
+    rows.map(e => `<tr><td>${dashEsc(e.at.replace("T"," ").slice(0,19))}</td><td>${dashEsc(e.cmd)}</td><td class="v-${dashEsc(e.verdict||"")}">${dashEsc(e.verdict || (e.ok ? "ok" : "fail"))}</td><td>${dashEsc((e.actions||[]).join(" · ") || e.error || e.reason || (e.deal ? JSON.stringify(e.deal) : "") || "")}</td></tr>`).join("") + `</table></div>`;
+  $("#main").innerHTML = h;
+}
+function card(t, body) { return `<div class="card"><h2>${t}</h2>${body}</div>`; }
+$("#period").onchange = load; load(); setInterval(load, 30000);
+</script>
+</body>
+</html>

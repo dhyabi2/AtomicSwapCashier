@@ -1,0 +1,17 @@
+{
+  "name": "cashir",
+  "version": "1.0.0",
+  "description": "Cashir — a LIVE autonomous XNO⇄XMR cashier (certified-win market maker) run 100% by the Hermes agent. Realtime two-sided market making with proven end-to-end settlement and crash recovery.",
+  "private": true,
+  "bin": { "cashir": "bin/cashir.cjs" },
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "health": "node bin/cashir.cjs health",
+    "cycle": "node bin/cashir.cjs cycle",
+    "report": "node bin/cashir.cjs report",
+    "dashboard": "node bin/cashir.cjs dashboard",
+    "test": "node test/cashir_test.cjs && node vendor/NearInstant/web/profit_gates.cjs"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
